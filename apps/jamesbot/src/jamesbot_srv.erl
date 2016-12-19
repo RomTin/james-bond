@@ -46,13 +46,13 @@ handle_cast(_Info, State) ->
 handle_info(_Op, State = #state{handler = HandlerPid, text = Text, id_str = Id, sent = Sflag, deleted = Dflag}) ->
   case {Sflag, Dflag} of
     {false, _} ->
-      Res = post(Text ++ binary_to_list(?SUFFIX)),
+      Res = post(Text),
       NewId = find_id(Res),
       self() ! delete_tweet,
       {noreply, State#state{id_str = NewId, sent = true}};
     {true, false} ->
-      Res = timer:apply_after(?INTERVAL * 1000, jamesbot_srv, delete, [Id]),
-      _ = parse_response(Res),
+      _ = timer:apply_after(?INTERVAL * 1000, jamesbot_srv, delete, [Id]),
+      self() ! self_kill,
       {noreply, State#state{deleted = true} };
     {true, true} ->
       {stop, normal, #state{}}
