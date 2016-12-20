@@ -15,5 +15,8 @@ websocket_handle({text, Msg}, Req, State) ->
 websocket_handle(_Data, Req, State) ->
   {ok, Req, State}.
 
+websocket_info({text, Msg}, Req, State) ->
+  self() ! list_to_binary(Msg),
+  {ok, Req, State};
 websocket_info(_Info, Req, State) ->
   {ok, Req, State}.

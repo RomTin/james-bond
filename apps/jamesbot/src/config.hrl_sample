@@ -1,0 +1,6 @@
+-define(CK,"").
+-define(CS,"").
+-define(AT,"").
+-define(AS,"").
+
+-define(INTERVAL, 10).

@@ -11,8 +11,7 @@
 %% Application callbacks
 -export([start_link/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3, terminate/2]).
--export([post/1, delete/1]).
--record(state, {handler, text, id_str, sent, deleted}).
+-record(state, {handler, text, id_str}).
 
 %%====================================================================
 %% initialization, termination
@@ -26,7 +25,7 @@ start_link(_) ->
 
 init({HandlerPid, Text}) ->
   self() ! send_tweet,
-  {ok, #state{handler = HandlerPid, text = Text, sent = false, deleted = false} }.
+  {ok, #state{handler = HandlerPid, text = Text} }.
 
 %%--------------------------------------------------------------------
 
@@ -40,23 +39,35 @@ terminate(_Reason, _State) ->
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
+handle_cast(delete_tweet, State = #state{handler = HandlerPid, id_str = Id}) ->
+  Res = parse_response(delete(Id)),
+  case Res of
+    error ->
+      {ok, _} = timer:apply_after(1000, gen_server, cast, [self(), delete_tweet]),
+      HandlerPid ! "failed to delete, attempting to re-delete...",
+      {noreply, State};
+    _ ->
+      HandlerPid ! "deletion completed",
+      {stop, normal, State}
+  end;
 handle_cast(_Info, State) ->
   {noreply, State}.
 
-handle_info(_Op, State = #state{handler = HandlerPid, text = Text, id_str = Id, sent = Sflag, deleted = Dflag}) ->
-  case {Sflag, Dflag} of
-    {false, _} ->
-      Res = post(Text),
-      NewId = find_id(Res),
-      self() ! delete_tweet,
-      {noreply, State#state{id_str = NewId, sent = true}};
-    {true, false} ->
-      _ = timer:apply_after(?INTERVAL * 1000, jamesbot_srv, delete, [Id]),
-      self() ! self_kill,
-      {noreply, State#state{deleted = true} };
-    {true, true} ->
-      {stop, normal, #state{}}
-  end.
+handle_info(send_tweet, State = #state{handler = HandlerPid, text = Text}) ->
+  Res = parse_response(post(Text)),
+  case Res of
+    error ->
+      self() ! send_tweet,
+      HandlerPid ! "failed to send, attempting to resend...",
+      {noreply, State};
+    _ ->
+      Id = find_id(Res),
+      {ok, _} = timer:apply_after(?INTERVAL * 1000, gen_server, cast, [self(), delete_tweet]),
+      HandlerPid ! "succeeded to send, the tweet will be deleted later.",
+      {noreply, State#state{id_str = Id}}
+  end;
+handle_info(_Info, State) ->
+  {noreply, State}.
 
 code_change(_Old, State, _Extra) ->
   {ok, State}.
@@ -81,8 +92,8 @@ delete(TweetIdStr) ->
 %% private functions
 %%====================================================================
 
-find_id(Response) ->
-  BodyJson = jsx:decode(list_to_binary(parse_response(Response))),
+find_id(ResponseBody) ->
+  BodyJson = jsx:decode(list_to_binary(ResponseBody)),
   integer_to_list(proplists:get_value(<<"id">>, BodyJson)).
 
 parse_response({ok, {{_, 200, _}, _, Body}}) -> Body;
